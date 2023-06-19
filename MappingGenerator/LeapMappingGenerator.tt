@@ -1,0 +1,120 @@
+﻿<#@ template debug="true" hostspecific="true" language="C#v3.5" #>
+<#@ output extension=".txt" #>
+<#@ assembly name="System.Xml" #>
+<#@ assembly name="System" #>
+<#@ assembly name="System.Xml.Linq" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Xml" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Globalization" #>
+<#@ import namespace="System.Text.RegularExpressions" #>
+
+<#
+    // Before running verify the fullGeneration & allowList settings
+
+    // works in conjunction with allowlist
+    // - if true will generate all files from available xml files - properties not spefied in the allow list will be added but commented out
+    // - if false will only generate from allowlist - properties not spefied in the allow list will be added but commented out
+    var fullFileGeneration = true;
+    var allowList = new Dictionary<string, string[]>()
+                {
+                    {"BankruptcyDetails", new string[] {"IrsFamilyNumber", "TotalRealPropertyValue", "TotalPersonalProperty", "TotalNonDischargeableDebt", "StateFamilyMedianIncome", "TotalLiabilities", "TypeOfDebtor", "NatureOfDebt", "MaritalFilingStatus", "FeeStatus", "NaicsCode", "PresumptionChapter7", "ChapterNumber"}},
+                    {"Court", new string[] { "CourtType", "Division", "Part", "IndexNumber", "DistrictNumber", "DistrictCourtCaseNo", "DocketNumber", "CaseNumber" } },
+                    {"Creditor", new string[] {"CalcTotalValueOfAllSecuredClaims", "CalcTotalValueOfAllUnsecuredPriorityClaims", "CalcTotalValueOfAllUnsecuredNonpriorityClaims"}},
+                    {"Debtor", new string[] {"CalcCombinedIncome", "CalcCurrentMonthlyIncome", "CalcNetIncome", "CalcTotalExpenses"}},
+                    {"EstateDetails", new string[] { "GrossValueOfEstate" }},
+                    {"Property", new string[] { "AddressApartmentShopUnitNumber", "Block", "AddressBuildingName", "AddressMunicipalityCityTown", "AddressCounty", "CalcEqualizedValuation", "Lot", "ModelBlock", "ModelLot", "AddressMunicipalityType", "NewConstructionTF", "AddressStreetNumber", "PercentageInterest", "PostalTownTownship", "Qualifier", "StreetName", "Section", "AddressState", "AddressStreet", "TypeOfUse", "AddressZIPCode" }}
+                    
+                };
+
+    // holds the type converts from leap to c#
+    // to map Array, 
+    var dataTypeMap = new Dictionary<string, string> { { "ShortText", "string" }, { "Number", "decimal" }, { "Boolean", "bool"}, { "LongText", "string" }, { "Date", "DateTime" } };
+
+    // get files doesn't support folder globbing so work around it
+    var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+    var rootDirectory = appData + @"\LEAP Desktop\User\";
+    var files = Directory.GetDirectories(rootDirectory, "*", SearchOption.AllDirectories).Where(
+        (directoryPath) => StringComparer.OrdinalIgnoreCase.Compare(Path.GetFileName(directoryPath), @"Tables") == 0).SelectMany(
+        (directoryPath) => Directory.GetFiles(directoryPath, "*.xml"));
+
+    foreach (var file in files)
+    {
+        var xmlString = File.ReadAllText(file);
+        var fileName = Path.GetFileNameWithoutExtension(file);
+
+        var xmlDoc = new XmlDocument();
+        xmlDoc.LoadXml(xmlString);
+        var tableNode = xmlDoc.SelectSingleNode("//Table");
+        var className = tableNode.Attributes["ClassName"]?.InnerText;
+        if (!fullFileGeneration && !allowList.ContainsKey(className)) { continue; } // check to see if config has setting
+
+        var fieldNodes = xmlDoc.SelectNodes("//Field").Cast<XmlNode>()
+                .OrderBy(r => r.SelectSingleNode("Name").InnerText);
+
+        Func<string, string> cleanName = str => Regex.Replace(new CultureInfo("en-US", false).TextInfo.ToTitleCase(str), "[^a-zA-Z0-9]", String.Empty);
+
+        // map the FieldId and Name values
+        // then organize by our allowlist
+        var allNodes = fieldNodes.Select(f => new { fieldId = f.SelectSingleNode("FieldId")?.InnerText, name = cleanName(f.SelectSingleNode("Name")?.InnerText), datatype = f.SelectSingleNode("DataType")?.InnerText, deleted = f.SelectSingleNode("DeleteCode")?.InnerText == "1" });
+        var allowedFieldNodes = allNodes.Where(n => !n.deleted && allowList.ContainsKey(className) && allowList[className].Contains(n.name, StringComparer.CurrentCultureIgnoreCase));
+        var disallowedFieldNodes = allNodes.Where(n => !n.deleted && (!allowList.ContainsKey(className) || !allowList[className].Contains(n.name, StringComparer.CurrentCultureIgnoreCase)));
+
+#>
+using Integration.PMS.Api.Models.Attributes;
+using Integration.PMS.Api.Models.Contracts.Data.Leap;
+using Integration.PMS.Api.Models.Enums;
+using Integration.PMS.Api.Models.Enums.Leap;
+using System;
+
+namespace Integration.PMS.Api.Models.Data.Leap.Matters.Us.Tables
+{
+    public class <#= className #> : IMatterDefinableTable
+    {
+        // [LeapCardMetadata(Region.US, id: "<#= fileName #>")] // add if necessary to LeapCardType
+        public LeapCardType Type => LeapCardType.<#= className #>;
+        public Region Region => Region.US;
+
+<#      if (allowList.ContainsKey(className) && allowedFieldNodes.Count() != allowList[className].Count()) {
+#>
+        // TODO - missing props defined in allow list
+<#      } // end count nodes compare
+#>
+<#      foreach (var ele in allowedFieldNodes) {
+            var dataType = dataTypeMap.ContainsKey(ele.datatype) ? dataTypeMap[ele.datatype] : ele.datatype;
+#>
+        [DefinableTableFieldMetadata("<#= ele.fieldId #>")]
+        public <#= dataType #> <#= ele.name #> { get; set; }
+
+<#
+        } // end of foreach allowedFieldNodes loop
+#>
+        // Additional Fields from the XML file
+
+<#      foreach (var ele in disallowedFieldNodes) {
+            var dataType = dataTypeMap.ContainsKey(ele.datatype) ? dataTypeMap[ele.datatype] : ele.datatype;
+#>
+        // [DefinableTableFieldMetadata("<#= ele.fieldId #>")]
+        // public <#= dataType #> <#= ele.name #> { get; set; }
+
+<#
+        } // end of foreach disallowedFieldNodes loop
+#>
+    } // end class
+} // end namespace
+<#
+SaveOutput(className + ".cs");
+} // end of for each file
+#>
+// Files generated into the folder indicated in the TT file
+<#+
+private void SaveOutput(string outputFileName) {
+  var templateDirectory = Path.GetDirectoryName(Host.TemplateFile) + @"\generatedByConfig";
+  Directory.CreateDirectory(templateDirectory);
+  var outputFilePath = Path.Combine(templateDirectory, outputFileName);
+  File.WriteAllText(outputFilePath, this.GenerationEnvironment.ToString()); 
+  this.GenerationEnvironment.Remove(0, this.GenerationEnvironment.Length);
+}
+#>
