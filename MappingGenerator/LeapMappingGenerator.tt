@@ -1,4 +1,4 @@
-﻿<#@ template debug="true" hostspecific="true" language="C#v3.5" #>
+﻿<#@ template debug="true" hostspecific="true" #>
 <#@ output extension=".txt" #>
 <#@ assembly name="System.Xml" #>
 <#@ assembly name="System" #>
@@ -104,6 +104,40 @@ namespace Integration.PMS.Api.Models.Data.Leap.Matters.Us.Tables
 #>
     } // end class
 } // end namespace
+
+// ********************************************************
+
+namespace InfoTrack.IntegrationGateway.Application.US.Contracts.PmsApi.Matters.Cards
+{
+    public class <#= className #>
+    {
+
+<#      if (allowList.ContainsKey(className) && allowedFieldNodes.Count() != allowList[className].Count()) {
+#>
+        // TODO - missing props defined in allow list
+<#      } // end count nodes compare
+#>
+<#      foreach (var ele in allowedFieldNodes) {
+            var dataType = dataTypeMap.ContainsKey(ele.datatype) ? dataTypeMap[ele.datatype] : ele.datatype;
+#>
+        public <#= dataType #> <#= ele.name #> { get; set; }
+
+<#
+        } // end of foreach allowedFieldNodes loop
+#>
+        // Additional Fields from the XML file
+
+<#      foreach (var ele in disallowedFieldNodes) {
+            var dataType = dataTypeMap.ContainsKey(ele.datatype) ? dataTypeMap[ele.datatype] : ele.datatype;
+#>
+        // public <#= dataType #> <#= ele.name #> { get; set; }
+
+<#
+        } // end of foreach disallowedFieldNodes loop
+#>
+    } // end class
+} // end namespace
+
 <#
 SaveOutput(className + ".cs");
 } // end of for each file
